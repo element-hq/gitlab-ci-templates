@@ -25,7 +25,6 @@
       --image-name-with-digest-file ./image-name-digest \
       --build-arg "TARGETPLATFORM=linux/${BUILD_ARCH}" \
       --build-arg "BASE_IMAGE_TAG=${VERSION}" \
-      --registry-mirror "${REGISTRY_CACHE_DOCKER_IO}" \
       --cache=true --compressed-caching=false \
       ${KANIKO_EXTRA_ARGS}
 
