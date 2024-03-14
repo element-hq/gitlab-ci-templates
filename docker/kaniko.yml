@@ -14,7 +14,7 @@
     - |-
       # hacky fix to exclude service account tokens from /var on pod from built image
       # https://github.com/GoogleContainerTools/kaniko/issues/1297#issuecomment-1149054291
-      mv /var /var-orig
+      [ -d /var ] && mv /var /var-orig
     - |-
       export SHORT_ARCH && \
       /kaniko/executor \
