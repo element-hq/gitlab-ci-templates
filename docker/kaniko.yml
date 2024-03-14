@@ -1,0 +1,65 @@
+.build-image-kaniko: &build_image_kaniko
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  variables:
+    KANIKO_EXTRA_ARGS: ""
+    DOCKER_FILE_PATH: "${DOCKER_BUILD_PATH}/Dockerfile"
+  before_script:
+      - mkdir -p /kaniko/.docker
+      - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+      - export VERSION="${VERSION:-${CI_COMMIT_REF_SLUG}}"
+      - if [ -z "${DOCKER_IMAGE_NAME}" ]; then export DOCKER_IMAGE_NAME=${CI_REGISTRY_IMAGE}; else export DOCKER_IMAGE_NAME="${CI_REGISTRY_IMAGE}/${DOCKER_IMAGE_NAME}";fi
+  script:
+    - |-
+      # hacky fix to exclude service account tokens from /var on pod from built image
+      # https://github.com/GoogleContainerTools/kaniko/issues/1297#issuecomment-1149054291
+      mv /var /var-orig
+    - |-
+      export SHORT_ARCH && \
+      /kaniko/executor \
+      --ignore-path /workspace \
+      --context "${DOCKER_BUILD_PATH}" \
+      --dockerfile "${DOCKER_FILE_PATH}" \
+      --destination "${DOCKER_IMAGE_NAME}:${VERSION}-${BUILD_ARCH}" \
+      --image-name-with-digest-file ./image-name-digest \
+      --build-arg "TARGETPLATFORM=linux/${BUILD_ARCH}" \
+      --build-arg "BASE_IMAGE_TAG=${VERSION}" \
+      --registry-mirror "${REGISTRY_CACHE_DOCKER_IO}" \
+      --cache=true --compressed-caching=false \
+      ${KANIKO_EXTRA_ARGS}
+
+.build-multiarch-manifest:
+  variables:
+    DIGEST_FILE_PATH: ${CI_PROJECT_DIR}/digest-file
+  image:
+    name: curlimages/curl:latest
+    entrypoint: [""]
+  before_script:
+      - export VERSION="${VERSION:-${CI_COMMIT_REF_SLUG}}"
+      - if [ -z "${DOCKER_IMAGE_NAME}" ]; then export DOCKER_IMAGE_NAME=${CI_REGISTRY_IMAGE}; else export DOCKER_IMAGE_NAME="${CI_REGISTRY_IMAGE}/${DOCKER_IMAGE_NAME}";fi
+  script:
+    - curl -s -L https://github.com/estesp/manifest-tool/releases/download/v2.0.8/binaries-manifest-tool-2.0.8.tar.gz | tar xvz
+    - mv manifest-tool-linux-amd64 manifest-tool
+    - chmod +x manifest-tool
+    - |-
+      output=$(./manifest-tool --username "${CI_REGISTRY_USER}" --password "${CI_REGISTRY_PASSWORD}" push from-args \
+      --platforms ${PLATFORMS:-linux/amd64,linux/arm64} \
+      --template ${DOCKER_IMAGE_NAME}:${VERSION}-ARCH \
+      --tags ${VERSION} \
+      --target ${DOCKER_IMAGE_NAME}:${VERSION} \
+      ${MANIFEST_TOOL_EXTRA_ARGS}
+      )
+    - |-
+      if [[ $CI_COMMIT_BRANCH = "main" ]]; then 
+      ./manifest-tool --username "${CI_REGISTRY_USER}" --password "${CI_REGISTRY_PASSWORD}" push from-args \
+        --platforms ${PLATFORMS:-linux/amd64,linux/arm64} \
+        --template ${DOCKER_IMAGE_NAME}:${VERSION}-ARCH \
+        --tags ${VERSION} \
+        --target ${DOCKER_IMAGE_NAME}:latest \
+        ${MANIFEST_TOOL_EXTRA_ARGS}
+      fi
+    - echo $output  # example output : Digest: sha256:6c06cd41d5ee96e4ed3e955abff290d7555641200927136cb83434d07837df96 685
+    - digest="${output#*sha256:}" #  remove everything before and including sha256:
+    - digest="${digest%% *}" # extract everything before the first space
+    - echo "sha256:${digest}" > ${DIGEST_FILE_PATH}

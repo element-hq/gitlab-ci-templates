@@ -1,0 +1,34 @@
+
+.crane-copy:
+  image:
+    name: gcr.io/go-containerregistry/crane:debug
+  script:
+  - crane auth login "${CI_REGISTRY_IMAGE%%/*}" -u $CI_REGISTRY_USER --password $CI_REGISTRY_PASSWORD
+  - crane auth login "${ADDITIONAL_DESTINATION%%/*}" -u $ADDITIONAL_REGISTRY_USER --password $ADDITIONAL_REGISTRY_PASSWORD
+  - |-
+    if [[ $CI_COMMIT_BRANCH = "main" ]]; then
+      export VERSION="latest"
+    fi
+  - IMAGE_REF="${BUILD_ARCH}_IMAGE_NAME_DIGEST"
+  - eval crane pull "\$$IMAGE_REF" image.tar
+  - crane push image.tar ${ADDITIONAL_DESTINATION}:${VERSION}-${BUILD_ARCH}
+
+.build-additionaldestionation-manifest:
+  image:
+    name: curlimages/curl:latest
+    entrypoint: [""]
+  script:
+    - curl -s -L https://github.com/estesp/manifest-tool/releases/download/v2.0.8/binaries-manifest-tool-2.0.8.tar.gz | tar xvz
+    - mv manifest-tool-linux-amd64 manifest-tool
+    - chmod +x manifest-tool
+    - |-
+      if [[ $CI_COMMIT_BRANCH = "main" ]]; then
+        export VERSION="latest"
+      fi
+    - |-
+      ./manifest-tool --username "${ADDITIONAL_REGISTRY_USER}" --password "${ADDITIONAL_REGISTRY_PASSWORD}" push from-args \
+      --platforms ${ADDITIONAL_PLATFORMS} \
+      --template ${ADDITIONAL_DESTINATION}:${VERSION}-ARCH \
+      --tags ${VERSION} \
+      --target ${ADDITIONAL_DESTINATION}:${VERSION}
+
